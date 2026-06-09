@@ -1,3 +1,8 @@
 fast-flights
 flask
 flask-cors
+typing_extensions
+primp
+protobuf
+selectolax
+playwright
