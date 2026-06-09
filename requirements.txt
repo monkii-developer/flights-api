@@ -1,7 +1,4 @@
-selectolax>=0.4.10
-protobuf==7.35.0
-primp==1.3.1
-typing-extensions
+fast-flights
 flask
 flask-cors
 gunicorn
