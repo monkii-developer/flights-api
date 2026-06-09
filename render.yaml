@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: flight-api
+    name: flight-search-api
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn api:app
+    startCommand: gunicorn app:app
