@@ -1,4 +1,4 @@
 flask
 flask-cors
-fast-flights
-gunicorn
+requests
+beautifulsoup4
