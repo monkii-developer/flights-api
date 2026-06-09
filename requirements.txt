@@ -1,4 +1,3 @@
+fast-flights
 flask
 flask-cors
-requests
-beautifulsoup4
