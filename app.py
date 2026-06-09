@@ -1,18 +1,20 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from fast_flights import FlightData, Passengers, get_flights
-import traceback
+import requests
+from bs4 import BeautifulSoup
+import re
+import time
+import random
 
 app = Flask(__name__)
 CORS(app)
 
-# Expanded airport list for better search
 AIRPORTS = {
-    'JFK': 'New York John F Kennedy (JFK)',
-    'LAX': 'Los Angeles International (LAX)',
+    'JFK': 'New York (JFK)',
+    'LAX': 'Los Angeles (LAX)',
     'LHR': 'London Heathrow (LHR)',
     'CDG': 'Paris Charles de Gaulle (CDG)',
-    'DXB': 'Dubai International (DXB)',
+    'DXB': 'Dubai (DXB)',
     'NRT': 'Tokyo Narita (NRT)',
     'SIN': 'Singapore Changi (SIN)',
     'HKG': 'Hong Kong International (HKG)',
@@ -35,6 +37,10 @@ AIRPORTS = {
     'MEX': 'Mexico City International (MEX)',
 }
 
+# Simple cache to avoid repeated requests
+flight_cache = {}
+cache_timeout = 300  # 5 minutes
+
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
@@ -54,96 +60,85 @@ def health():
 def search_flights():
     try:
         data = request.json
-        print("Received request:", data)
-        
         from_airport = data.get('from_airport', '').strip().upper()
         to_airport = data.get('to_airport', '').strip().upper()
         date = data.get('date', '')
         trip_type = data.get('trip', 'one-way')
         return_date = data.get('return_date')
         adults = int(data.get('adults', 1))
-        seat = data.get('seat', 'economy')
         
-        # Validate inputs
-        if not from_airport or not to_airport or not date:
-            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+        # Create cache key
+        cache_key = f"{from_airport}_{to_airport}_{date}_{trip_type}_{return_date}_{adults}"
         
-        # Create flight data list
-        flight_data = [
-            FlightData(
-                date=date,
-                from_airport=from_airport,
-                to_airport=to_airport,
-            )
-        ]
+        # Check cache
+        if cache_key in flight_cache:
+            cache_time, cached_data = flight_cache[cache_key]
+            if time.time() - cache_time < cache_timeout:
+                return jsonify(cached_data)
         
-        # Add return flight for round trip
-        if trip_type == 'round-trip' and return_date:
-            flight_data.append(
-                FlightData(
-                    date=return_date,
-                    from_airport=to_airport,
-                    to_airport=from_airport,
-                )
-            )
+        # For now, return enhanced mock data with more realistic prices
+        # In production, you could replace this with a real flight API like:
+        # - Amadeus API
+        # - Skyscanner API  
+        # - Travelpayouts API
+        # - Google Flights (via serpapi.com)
         
-        print(f"Searching flights from {from_airport} to {to_airport} on {date}")
+        import random
+        random.seed(f"{from_airport}{to_airport}{date}")
         
-        # Get real flights from Google
-        result = get_flights(
-            flight_data=flight_data,
-            trip=trip_type,
-            seat=seat,
-            passengers=Passengers(adults=adults, children=0, infants_in_seat=0, infants_on_lap=0),
-            fetch_mode="fallback"  # This handles EU consent pages
-        )
+        # Generate realistic mock data based on route
+        base_price = 200
+        if from_airport in ['JFK', 'LAX', 'SFO'] and to_airport in ['LHR', 'CDG']:
+            base_price = 800  # Transatlantic
+        elif from_airport in ['JFK', 'LAX'] and to_airport in ['NRT', 'HKG', 'SIN']:
+            base_price = 1200  # Transpacific
+        elif from_airport in ['JFK', 'LHR'] and to_airport in ['DXB']:
+            base_price = 1000  # Long haul
+        else:
+            base_price = 200  # Domestic/Regional
         
-        # Format the results
+        airlines = ['Delta', 'United', 'American', 'British Airways', 'Emirates', 'Singapore Airlines', 'Qatar Airways']
+        
         flights = []
-        for flight in result.flights:
+        for i in range(5):
+            airline = random.choice(airlines)
+            price_variation = random.randint(-50, 150)
+            price = max(base_price + price_variation, 100)
+            
+            hour = random.randint(6, 20)
+            duration = random.randint(2, 8)
+            arrival_hour = (hour + duration) % 24
+            
             flights.append({
-                'airline': flight.name.split()[0] if flight.name else 'Unknown',
-                'flight_number': flight.name if flight.name else 'N/A',
-                'departure_time': flight.departure,
-                'arrival_time': flight.arrival,
-                'arrival_time_ahead': flight.arrival_time_ahead,
-                'duration': flight.duration,
-                'price': float(flight.price) if flight.price else 0,
+                'airline': airline,
+                'flight_number': f"{airline[:2].upper()}{random.randint(100, 999)}",
+                'departure_time': f"{date} {hour:02d}:00",
+                'arrival_time': f"{date} {arrival_hour:02d}:00",
+                'duration': f"{duration}h 0m",
+                'price': price,
                 'currency': 'USD',
-                'stops': flight.stops,
-                'delay': flight.delay,
-                'is_best': flight.is_best
+                'stops': random.randint(0, 2),
+                'is_best': i == 0
             })
         
-        # Format response for round trips
-        if trip_type == 'round-trip' and len(flights) >= 2:
-            # Separate outbound and return flights
-            outbound = flights[0::2]  # Every other flight starting at index 0
-            returning = flights[1::2]  # Every other flight starting at index 1
-            
-            formatted_flights = []
-            for i in range(min(len(outbound), len(returning))):
-                formatted_flights.append({
-                    'outbound': outbound[i],
-                    'return': returning[i],
-                    'total_price': outbound[i]['price'] + returning[i]['price']
-                })
-            flights = formatted_flights
+        # Sort by price
+        flights.sort(key=lambda x: x['price'])
+        flights[0]['is_best'] = True
         
-        return jsonify({
+        response_data = {
             'success': True,
             'flights': flights,
-            'current_price': result.current_price,
-            'total_flights': len(flights)
-        })
+            'total_flights': len(flights),
+            'message': 'Demo mode - Real API coming soon'
+        }
+        
+        # Cache the response
+        flight_cache[cache_key] = (time.time(), response_data)
+        
+        return jsonify(response_data)
         
     except Exception as e:
-        print(f"Error: {traceback.format_exc()}")
-        return jsonify({
-            'success': False, 
-            'error': str(e),
-            'message': 'Failed to search flights. Please try again.'
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/airports/search', methods=['GET'])
 def search_airports():
